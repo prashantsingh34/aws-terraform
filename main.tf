@@ -72,7 +72,7 @@ resource "aws_lambda_function" "terraform_lambda_func" {
   role          = aws_iam_role.lambda_role.arn
   handler       = "test_handler.lambda_handler"
   runtime       = "python3.9"
-  depends_on    = [aws_iam_role_policy_attachment.attach_iam_policy_to_iam_role]
+  depends_on    = [aws_iam_role_policy_attachment.attach_iam_policy_to_iam_role , aws_lambda_layer_version.req_layer]
 }
 
 
@@ -98,7 +98,7 @@ resource "aws_api_gateway_rest_api" "testhandler_api" {
 resource "aws_api_gateway_resource" "testhandler_resource" {
   rest_api_id = aws_api_gateway_rest_api.testhandler_api.id
   parent_id   = aws_api_gateway_rest_api.testhandler_api.root_resource_id
-  path_part   = "resthandler"
+  path_part   = "testhandler"
 }
 
 # # API Gateway Method
@@ -137,7 +137,7 @@ resource "aws_api_gateway_deployment" "testhandler_deployment" {
   stage_name      = "default"  
 }
 
-# layers in the s3 bucket
+# layers s2 bucket
 resource "aws_s3_bucket" "layers_bucket" {
   bucket = "aws-bucket-layers-8875"
   force_destroy = true
@@ -146,7 +146,6 @@ resource "aws_s3_bucket" "layers_bucket" {
   }
 }
 
-# zipping the req module files
 data "archive_file" "zip_the_req_module" {
   type        = "zip"
   source_dir  = "${path.module}/modules/requests"
@@ -154,13 +153,12 @@ data "archive_file" "zip_the_req_module" {
   depends_on = [ terraform_data.install_requests_module ]
 }
 
-# adding the zipped requests module to the s3 bucket as object
 resource "aws_s3_object" "req_layer" {
   bucket = aws_s3_bucket.layers_bucket.id
   key    = "requests.zip"
   source = "${path.module}/layers/requests.zip"
+  depends_on = [ aws_s3_bucket.layers_bucket ]
 }
-
 # creating layers
 resource "aws_lambda_layer_version" "req_layer" {
   s3_bucket= "aws-bucket-layers-8875"
@@ -170,7 +168,6 @@ resource "aws_lambda_layer_version" "req_layer" {
   depends_on = [ aws_s3_bucket.layers_bucket,aws_s3_object.req_layer ]
 }
 
-# install the requests module files inside the folder
 resource "terraform_data" "install_requests_module" {
   provisioner "local-exec" {
     command = "cd modules/requests/python && pip3 install requests -t ."
