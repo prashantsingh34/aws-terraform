@@ -61,14 +61,17 @@ data "archive_file" "zip_the_python_code" {
   output_path = "${path.module}/python/test_handler.zip"
 }
 
+
+
 # Create a lambda function
 # In terraform ${path.module} is the current directory.
 resource "aws_lambda_function" "terraform_lambda_func" {
+  layers = [ aws_lambda_layer_version.req_layer.id ]
   filename      = "${path.module}/python/test_handler.zip"
   function_name = "lambda-from-terraform"
   role          = aws_iam_role.lambda_role.arn
   handler       = "test_handler.lambda_handler"
-  runtime       = "python3.8"
+  runtime       = "python3.9"
   depends_on    = [aws_iam_role_policy_attachment.attach_iam_policy_to_iam_role]
 }
 
@@ -132,4 +135,44 @@ resource "aws_api_gateway_deployment" "testhandler_deployment" {
   depends_on      = [aws_api_gateway_integration.testhandler_integration]
   rest_api_id     = aws_api_gateway_rest_api.testhandler_api.id
   stage_name      = "default"  
+}
+
+# layers in the s3 bucket
+resource "aws_s3_bucket" "layers_bucket" {
+  bucket = "aws-bucket-layers-8875"
+  force_destroy = true
+  tags = {
+    Name        = "aws-bucket-layers-8875"
+  }
+}
+
+# zipping the req module files
+data "archive_file" "zip_the_req_module" {
+  type        = "zip"
+  source_dir  = "${path.module}/modules/requests"
+  output_path = "${path.module}/layers/requests.zip"
+  depends_on = [ terraform_data.install_requests_module ]
+}
+
+# adding the zipped requests module to the s3 bucket as object
+resource "aws_s3_object" "req_layer" {
+  bucket = aws_s3_bucket.layers_bucket.id
+  key    = "requests.zip"
+  source = "${path.module}/layers/requests.zip"
+}
+
+# creating layers
+resource "aws_lambda_layer_version" "req_layer" {
+  s3_bucket= "aws-bucket-layers-8875"
+  s3_key = "requests.zip"
+  layer_name = "requests_module"
+  compatible_runtimes = ["python3.9"]
+  depends_on = [ aws_s3_bucket.layers_bucket,aws_s3_object.req_layer ]
+}
+
+# install the requests module files inside the folder
+resource "terraform_data" "install_requests_module" {
+  provisioner "local-exec" {
+    command = "cd modules/requests/python && pip3 install requests -t ."
+  }
 }
